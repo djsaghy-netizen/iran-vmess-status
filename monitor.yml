@@ -1,0 +1,265 @@
+name: Iran Vmess Server Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "2/5 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: iran-vmess-status-page
+  cancel-in-progress: true
+
+jobs:
+  monitor-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: دریافت فایل‌های پروژه
+        uses: actions/checkout@v4
+
+      - name: بررسی تنظیمات
+        env:
+          SUBSCRIPTION_URL: ${{ secrets.SUBSCRIPTION_URL }}
+        run: |
+          test -n "$SUBSCRIPTION_URL" || {
+            echo "Secret SUBSCRIPTION_URL تنظیم نشده است."
+            exit 1
+          }
+
+          docker pull kutovoys/xray-checker:latest
+
+      - name: تست اول با IPify
+        env:
+          SUBSCRIPTION_URL: ${{ secrets.SUBSCRIPTION_URL }}
+        run: |
+          docker run -d \
+            --name checker-ipify \
+            -p 2112:2112 \
+            -e SUBSCRIPTION_URL \
+            -e SUBSCRIPTION_USER_AGENT="v2rayNG/1.10.19" \
+            -e SUBSCRIPTION_UPDATE=false \
+            -e PROXY_CHECK_METHOD=ip \
+            -e PROXY_IP_CHECK_URL="https://api.ipify.org?format=text" \
+            -e PROXY_TIMEOUT=40 \
+            -e PROXY_CHECK_INTERVAL=3600 \
+            -e SIMULATE_LATENCY=true \
+            -e METRICS_HOST=0.0.0.0 \
+            -e METRICS_PORT=2112 \
+            -e WEB_SHOW_DETAILS=false \
+            -e LOG_LEVEL=warn \
+            -e XRAY_LOG_LEVEL=none \
+            kutovoys/xray-checker:latest
+
+          READY=0
+
+          for i in $(seq 1 160); do
+            if curl --silent --fail \
+              http://127.0.0.1:2112/api/v1/public/proxies \
+              --output checker-ipify.json; then
+
+              if python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("checker-ipify.json").read_text(encoding="utf-8"))
+          rows = payload.get("data", [])
+
+          if not payload.get("success") or not isinstance(rows, list) or not rows:
+              raise SystemExit(1)
+
+          checked = sum(int(row.get("lastCheck") or 0) > 0 for row in rows)
+          total = len(rows)
+          print(f"IPify: {checked}/{total}")
+
+          if checked != total:
+              raise SystemExit(1)
+          PY
+              then
+                READY=1
+                break
+              fi
+            fi
+
+            sleep 3
+          done
+
+          if [ "$READY" != "1" ]; then
+            echo "تست IPify کامل نشد."
+            docker logs checker-ipify || true
+            exit 1
+          fi
+
+          docker rm -f checker-ipify
+
+      - name: تست دوم با IP.SB
+        env:
+          SUBSCRIPTION_URL: ${{ secrets.SUBSCRIPTION_URL }}
+        run: |
+          docker run -d \
+            --name checker-ipsb \
+            -p 2113:2112 \
+            -e SUBSCRIPTION_URL \
+            -e SUBSCRIPTION_USER_AGENT="v2rayNG/1.10.19" \
+            -e SUBSCRIPTION_UPDATE=false \
+            -e PROXY_CHECK_METHOD=ip \
+            -e PROXY_IP_CHECK_URL="http://ip.sb" \
+            -e PROXY_TIMEOUT=40 \
+            -e PROXY_CHECK_INTERVAL=3600 \
+            -e SIMULATE_LATENCY=true \
+            -e METRICS_HOST=0.0.0.0 \
+            -e METRICS_PORT=2112 \
+            -e WEB_SHOW_DETAILS=false \
+            -e LOG_LEVEL=warn \
+            -e XRAY_LOG_LEVEL=none \
+            kutovoys/xray-checker:latest
+
+          READY=0
+
+          for i in $(seq 1 160); do
+            if curl --silent --fail \
+              http://127.0.0.1:2113/api/v1/public/proxies \
+              --output checker-ipsb.json; then
+
+              if python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("checker-ipsb.json").read_text(encoding="utf-8"))
+          rows = payload.get("data", [])
+
+          if not payload.get("success") or not isinstance(rows, list) or not rows:
+              raise SystemExit(1)
+
+          checked = sum(int(row.get("lastCheck") or 0) > 0 for row in rows)
+          total = len(rows)
+          print(f"IP.SB: {checked}/{total}")
+
+          if checked != total:
+              raise SystemExit(1)
+          PY
+              then
+                READY=1
+                break
+              fi
+            fi
+
+            sleep 3
+          done
+
+          if [ "$READY" != "1" ]; then
+            echo "تست IP.SB کامل نشد."
+            docker logs checker-ipsb || true
+            exit 1
+          fi
+
+          docker rm -f checker-ipsb
+
+      - name: ادغام نتیجه دو تست
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          first = json.loads(Path("checker-ipify.json").read_text(encoding="utf-8"))
+          second = json.loads(Path("checker-ipsb.json").read_text(encoding="utf-8"))
+
+          first_rows = {
+              str(row.get("stableId") or row.get("name")): row
+              for row in first.get("data", [])
+          }
+          second_rows = {
+              str(row.get("stableId") or row.get("name")): row
+              for row in second.get("data", [])
+          }
+
+          keys = list(dict.fromkeys([*first_rows.keys(), *second_rows.keys()]))
+          merged = []
+
+          for key in keys:
+              a = first_rows.get(key, {})
+              b = second_rows.get(key, {})
+
+              online_a = bool(a.get("online"))
+              online_b = bool(b.get("online"))
+              online = online_a or online_b
+
+              latencies = []
+              if online_a and isinstance(a.get("latencyMs"), int):
+                  latencies.append(a["latencyMs"])
+              if online_b and isinstance(b.get("latencyMs"), int):
+                  latencies.append(b["latencyMs"])
+
+              merged.append({
+                  "stableId": a.get("stableId") or b.get("stableId") or key,
+                  "name": a.get("name") or b.get("name") or "سرور بدون نام",
+                  "groupName": a.get("groupName") or b.get("groupName") or "",
+                  "online": online,
+                  "latencyMs": min(latencies) if latencies else None,
+                  "lastCheck": max(
+                      int(a.get("lastCheck") or 0),
+                      int(b.get("lastCheck") or 0),
+                  ),
+              })
+
+          result = {"success": True, "data": merged}
+          Path("checker-result.json").write_text(
+              json.dumps(result, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+
+          first_online = sum(bool(row.get("online")) for row in first_rows.values())
+          second_online = sum(bool(row.get("online")) for row in second_rows.values())
+          merged_online = sum(bool(row.get("online")) for row in merged)
+
+          summary = (
+              f"تعداد کل: {len(merged)}\n"
+              f"آنلاین در IPify: {first_online}\n"
+              f"آنلاین در IP.SB: {second_online}\n"
+              f"آنلاین نهایی: {merged_online}\n"
+          )
+
+          print(summary)
+
+          with open(Path.cwd() / "monitor-summary.txt", "w", encoding="utf-8") as file:
+              file.write(summary)
+
+          with open(Path.cwd() / "github-summary.md", "w", encoding="utf-8") as file:
+              file.write("## نتیجه مانیتور\n\n```text\n" + summary + "```\n")
+          PY
+
+          cat github-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: ساخت صفحه وضعیت
+        run: |
+          mkdir -p public
+          python3 scripts/build_status.py checker-result.json public/status.json
+          cp site/index.html public/index.html
+          touch public/.nojekyll
+
+      - name: ذخیره خلاصه آزمایش
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-summary
+          path: monitor-summary.txt
+          retention-days: 7
+
+      - name: آماده‌سازی GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: بارگذاری صفحه
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+      - name: انتشار نتیجه
+        id: deployment
+        uses: actions/deploy-pages@v4
