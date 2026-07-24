@@ -1,0 +1,116 @@
+name: Iran Vmess Server Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    # هر ۵ دقیقه؛ شروع از دقیقه ۲ برای کاهش احتمال شلوغی ابتدای ساعت
+    - cron: "2/5 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: iran-vmess-status-page
+  cancel-in-progress: true
+
+jobs:
+  monitor-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: دریافت فایل‌های پروژه
+        uses: actions/checkout@v4
+
+      - name: اجرای Xray Checker
+        env:
+          SUBSCRIPTION_URL: ${{ secrets.SUBSCRIPTION_URL }}
+        run: |
+          test -n "$SUBSCRIPTION_URL" || {
+            echo "Secret SUBSCRIPTION_URL تنظیم نشده است."
+            exit 1
+          }
+
+          docker pull kutovoys/xray-checker:latest
+
+          docker run -d \
+            --name xray-checker \
+            -p 2112:2112 \
+            -e SUBSCRIPTION_URL \
+            -e SUBSCRIPTION_USER_AGENT="v2rayNG/1.10.19" \
+            -e SUBSCRIPTION_UPDATE=false \
+            -e PROXY_CHECK_METHOD=status \
+            -e PROXY_STATUS_CHECK_URL="http://cp.cloudflare.com/generate_204" \
+            -e PROXY_TIMEOUT=18 \
+            -e PROXY_CHECK_INTERVAL=3600 \
+            -e METRICS_HOST=0.0.0.0 \
+            -e METRICS_PORT=2112 \
+            -e WEB_SHOW_DETAILS=false \
+            -e LOG_LEVEL=warn \
+            -e XRAY_LOG_LEVEL=none \
+            kutovoys/xray-checker:latest
+
+      - name: صبر تا پایان بررسی سرورها
+        run: |
+          READY=0
+
+          for i in $(seq 1 70); do
+            if curl --silent --fail \
+              http://127.0.0.1:2112/api/v1/public/proxies \
+              --output checker-result.json; then
+
+              if python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("checker-result.json")
+          try:
+              payload = json.loads(path.read_text(encoding="utf-8"))
+          except Exception:
+              raise SystemExit(1)
+
+          rows = payload.get("data", [])
+          if not payload.get("success") or not isinstance(rows, list) or not rows:
+              raise SystemExit(1)
+
+          # منتظر می‌مانیم حداقل یک نود واقعاً بررسی شده باشد.
+          if not any(int(item.get("lastCheck") or 0) > 0 for item in rows):
+              raise SystemExit(1)
+          PY
+              then
+                READY=1
+                break
+              fi
+            fi
+
+            sleep 3
+          done
+
+          if [ "$READY" != "1" ]; then
+            echo "نتیجه معتبر از Xray Checker دریافت نشد."
+            exit 1
+          fi
+
+      - name: ساخت JSON امن و صفحه وضعیت
+        run: |
+          mkdir -p public
+          python3 scripts/build_status.py checker-result.json public/status.json
+          cp site/index.html public/index.html
+          touch public/.nojekyll
+
+      - name: آماده‌سازی GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: بارگذاری صفحه
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+      - name: انتشار نتیجه
+        id: deployment
+        uses: actions/deploy-pages@v4
