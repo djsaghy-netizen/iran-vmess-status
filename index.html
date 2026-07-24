@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>وضعیت سرورهای Iran Vmess</title>
+  <style>
+    :root {
+      font-family: Vazirmatn, Tahoma, Arial, sans-serif;
+      color: #eaf0ff;
+      background: #07101f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% 0%, rgba(33,150,243,.20), transparent 35%),
+        radial-gradient(circle at 90% 10%, rgba(218,43,255,.16), transparent 38%),
+        #07101f;
+    }
+    .wrap { width: min(920px, 100%); margin: auto; padding: 22px 14px 45px; }
+    .hero, .card, .stat {
+      border: 1px solid rgba(151,171,219,.18);
+      background: rgba(14,27,51,.78);
+      box-shadow: 0 18px 55px rgba(0,0,0,.25);
+      backdrop-filter: blur(10px);
+    }
+    .hero { border-radius: 26px; padding: 23px; }
+    h1 { margin: 0 0 8px; font-size: clamp(22px, 5vw, 34px); }
+    .muted { color: #9eacc9; font-size: 14px; line-height: 1.8; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .stat { padding: 15px 11px; border-radius: 18px; text-align: center; }
+    .stat strong { display: block; font-size: 23px; margin-bottom: 5px; }
+    .stat span { color: #9eacc9; font-size: 12px; }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin: 18px 0 12px;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #3974ff, #9d42ff);
+      color: white;
+      padding: 11px 16px;
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .list { display: grid; gap: 10px; }
+    .card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 13px;
+      padding: 15px;
+      border-radius: 18px;
+    }
+    .name {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 850;
+      line-height: 1.55;
+    }
+    .flag { font-size: 25px; flex: 0 0 auto; }
+    .title { overflow-wrap: anywhere; }
+    .status {
+      min-width: 74px;
+      text-align: center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .online { color: #52eda1; background: rgba(43,203,121,.13); }
+    .offline { color: #ff8790; background: rgba(239,65,78,.14); }
+    .latency {
+      direction: ltr;
+      min-width: 82px;
+      text-align: left;
+      font-size: 17px;
+      font-weight: 900;
+      color: #dfe7ff;
+    }
+    .latency small { color: #8795b3; font-size: 11px; }
+    .error {
+      padding: 18px;
+      border-radius: 18px;
+      background: rgba(239,65,78,.12);
+      color: #ffadb3;
+      line-height: 1.8;
+    }
+    .spinner { opacity: .7; }
+    @media (max-width: 560px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .card {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+      .latency {
+        grid-column: 1 / -1;
+        width: 100%;
+        text-align: right;
+        padding-right: 35px;
+      }
+      .toolbar { align-items: stretch; flex-direction: column; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <h1>📡 وضعیت سرورهای Iran Vmess</h1>
+    <div class="muted">
+      اتصال واقعی V2Ray هر لوکیشن به‌صورت دوره‌ای بررسی می‌شود.
+      جزئیات اتصال و اطلاعات محرمانه نمایش داده نمی‌شوند.
+    </div>
+
+    <div class="stats">
+      <div class="stat"><strong id="total">—</strong><span>کل سرورها</span></div>
+      <div class="stat"><strong id="online">—</strong><span>آنلاین</span></div>
+      <div class="stat"><strong id="offline">—</strong><span>آفلاین</span></div>
+      <div class="stat"><strong id="avg">—</strong><span>میانگین پینگ</span></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="muted" id="updated">در حال دریافت آخرین نتیجه…</div>
+      <button type="button" id="reload">بررسی دوباره</button>
+    </div>
+  </section>
+
+  <section class="list" id="list" aria-live="polite">
+    <div class="card spinner">در حال بارگذاری وضعیت سرورها…</div>
+  </section>
+</main>
+
+<script>
+  const flags = [
+    [/germany|deutschland|آلمان/i, "🇩🇪"],
+    [/türkiye|turkey|ترکیه/i, "🇹🇷"],
+    [/united states|usa|america|آمریکا/i, "🇺🇸"],
+    [/uae|emirates|dubai|امارات/i, "🇦🇪"],
+    [/finland|فنلاند/i, "🇫🇮"],
+    [/netherlands|holland|هلند/i, "🇳🇱"],
+    [/france|فرانسه/i, "🇫🇷"],
+    [/india|هند/i, "🇮🇳"],
+    [/albania|آلبانی/i, "🇦🇱"],
+    [/italy|ایتالیا/i, "🇮🇹"],
+    [/poland|لهستان/i, "🇵🇱"],
+    [/sweden|سوئد/i, "🇸🇪"],
+    [/united kingdom|britain|england|uk|انگلیس/i, "🇬🇧"],
+    [/switzerland|سوئیس/i, "🇨🇭"],
+    [/estonia|استونی/i, "🇪🇪"],
+    [/armenia|ارمنستان/i, "🇦🇲"],
+    [/bahrain|بحرین/i, "🇧🇭"],
+    [/tunisia|تونس/i, "🇹🇳"],
+    [/belgium|بلژیک/i, "🇧🇪"],
+    [/malta|مالت/i, "🇲🇹"]
+  ];
+
+  function flagFor(name) {
+    const existing = String(name).match(/[\u{1F1E6}-\u{1F1FF}]{2}/u);
+    if (existing) return existing[0];
+    for (const [pattern, flag] of flags) {
+      if (pattern.test(name)) return flag;
+    }
+    return "🌐";
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, ch => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+    })[ch]);
+  }
+
+  function faNumber(value) {
+    return new Intl.NumberFormat("fa-IR").format(value);
+  }
+
+  function formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "زمان نامشخص";
+    return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(date);
+  }
+
+  async function loadStatus() {
+    const list = document.getElementById("list");
+    list.innerHTML = '<div class="card spinner">در حال دریافت آخرین نتیجه…</div>';
+
+    try {
+      const response = await fetch("./status.json?t=" + Date.now(), { cache: "no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const data = await response.json();
+
+      document.getElementById("total").textContent = faNumber(data.total ?? 0);
+      document.getElementById("online").textContent = faNumber(data.online ?? 0);
+      document.getElementById("offline").textContent = faNumber(data.offline ?? 0);
+      document.getElementById("avg").textContent =
+        data.averageLatencyMs == null ? "—" : faNumber(data.averageLatencyMs) + " ms";
+      document.getElementById("updated").textContent =
+        "آخرین بروزرسانی: " + formatDate(data.updatedAt);
+
+      const servers = Array.isArray(data.servers) ? data.servers : [];
+      list.innerHTML = servers.map(server => {
+        const isOnline = Boolean(server.online);
+        const latency = isOnline && Number.isFinite(server.latencyMs)
+          ? `${faNumber(server.latencyMs)} <small>ms</small>`
+          : "—";
+
+        return `
+          <article class="card">
+            <div class="name">
+              <span class="flag">${flagFor(server.name)}</span>
+              <span class="title">${escapeHtml(server.name)}</span>
+            </div>
+            <div class="status ${isOnline ? "online" : "offline"}">
+              ${isOnline ? "آنلاین" : "آفلاین"}
+            </div>
+            <div class="latency">${latency}</div>
+          </article>
+        `;
+      }).join("") || '<div class="error">هیچ سروری در نتیجه وجود ندارد.</div>';
+    } catch (error) {
+      list.innerHTML = `
+        <div class="error">
+          دریافت نتیجه ممکن نشد. چند دقیقه دیگر دوباره امتحان کن.
+        </div>`;
+    }
+  }
+
+  document.getElementById("reload").addEventListener("click", loadStatus);
+  loadStatus();
+  setInterval(loadStatus, 60000);
+</script>
+</body>
+</html>
